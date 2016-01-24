@@ -1,5 +1,5 @@
 module Main where
-import Numeric (readOct, readHex)
+import Numeric (readOct, readHex, readFloat)
 import Control.Monad
 import System.Environment
 import Text.ParserCombinators.Parsec hiding (spaces)
@@ -10,9 +10,9 @@ main = getArgs >>= print . eval . readExpr . head
 symbol :: Parser Char
 symbol = oneOf "!$%&|*+-/:<=>?@^_~"
 
-readExpr :: String -> LispVal
+readExpr :: [Char] -> LispVal
 readExpr input = case parse parseExpr "lisp" input of 
-    Left err -> "No match: " ++ show err
+    Left err -> String $ "No match: " ++ show err
     Right val -> val
 
 spaces :: Parser ()
@@ -70,6 +70,21 @@ parseBool = do
     char '#'
     (char 't' >> return (Bool True)) <|> (char 'f' >> return (Bool False))
 
+parseList :: Parser LispVal
+parseList = liftM List $ sepBy parseExpr spaces
+
+parseDottedList :: Parser LispVal
+parseDottedList = do
+    head <- endBy parseExpr spaces
+    tail <- char '.' >> spaces >> parseExpr
+    return $ DottedList head tail
+
+parseQuoted :: Parser LispVal
+parseQuoted = do
+    char '\''
+    x <- parseExpr
+    return $ List [Atom "quote", x]
+
 parseExpr :: Parser LispVal
 parseExpr = 
     parseAtom 
@@ -78,7 +93,11 @@ parseExpr =
     <|> try parseNumber
     <|> try parseBool
     <|> try parseCharacter
-
+    <|> parseQuoted
+    <|> do char '('
+           x <- try parseList <|> parseDottedList
+           char ')'
+           return x
 
     
 showVal :: LispVal -> String
@@ -114,5 +133,15 @@ primitives = [("+", numericBinop (+)),
               ("quotient", numericBinop quot),
               ("remainder", numericBinop rem)]
 
-            
+numericBinop :: (Integer -> Integer -> Integer) -> [LispVal] -> LispVal
+numericBinop op params = Number $ foldl1 op $ map unpackNum params
+
+unpackNum :: LispVal -> Integer
+unpackNum (Number n) = n
+unpackNum (String n) = let parsed = reads n :: [(Integer, String)] in
+                           if null parsed 
+                              then 0
+                              else fst $ parsed !! 0
+unpackNum (List [n]) = unpackNum n
+unpackNum _ = 0 
 
